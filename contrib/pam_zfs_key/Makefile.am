@@ -1,0 +1,26 @@
+include $(top_srcdir)/config/Rules.am
+
+VPATH = \
+	$(top_srcdir)/module/icp \
+	$(top_srcdir)/module/zcommon \
+	$(top_srcdir)/lib/libzfs
+
+if PAM_ZFS_ENABLED
+
+pammodule_LTLIBRARIES = libpam_zfs_key.la
+
+libpam_zfs_key_la_SOURCES = pam_zfs_key.c
+
+libpam_zfs_key_la_LIBADD = \
+	$(top_builddir)/lib/libnvpair/libnvpair.la \
+	$(top_builddir)/lib/libuutil/libuutil.la \
+	$(top_builddir)/lib/libzfs/libzfs.la \
+	$(top_builddir)/lib/libzfs_core/libzfs_core.la
+
+libpam_zfs_key_la_LDFLAGS = -version-info 1:0:0 -avoid-version -module
+
+libpam_zfs_key_la_LIBADD += -lpam $(LIBSSL)
+
+pamconfigs_DATA = zfs_key
+EXTRA_DIST = $(pamconfigs_DATA)
+endif

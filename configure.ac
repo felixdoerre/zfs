@@ -98,6 +98,7 @@ AC_CONFIG_FILES([
 	contrib/initramfs/hooks/Makefile
 	contrib/initramfs/scripts/Makefile
 	contrib/initramfs/scripts/local-top/Makefile
+	contrib/pam_zfs_key/Makefile
 	contrib/pyzfs/Makefile
 	contrib/pyzfs/setup.py
 	contrib/zcp/Makefile
