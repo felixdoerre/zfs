@@ -457,6 +457,10 @@ systemctl --system daemon-reload >/dev/null || true
 %config(noreplace) %{_sysconfdir}/%{name}/zpool.d/*
 %config(noreplace) %{_sysconfdir}/%{name}/vdev_id.conf.*.example
 %attr(440, root, root) %config(noreplace) %{_sysconfdir}/sudoers.d/*
+%if 0%{?_pam}
+%{_pammoduledir}/*
+%{_pamconfigsdir}/*
+%endif
 
 %files -n libzpool2
 %{_libdir}/libzpool.so.*
