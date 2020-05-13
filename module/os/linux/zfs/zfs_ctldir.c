@@ -70,6 +70,7 @@
  * as that used by the parent zfsvfs_t to make NFS happy.
  */
 
+#include <linux/fs_context.h>
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/time.h>
@@ -1033,9 +1034,11 @@ zfsctl_snapshot_unmount(char *snapname, int flags)
 	if (flags & MNT_FORCE)
 		argv[4] = "-fn";
 	argv[5] = se->se_path;
+	zfs_dbgmsg("starting umount: %s", argv[5]);
 	dprintf("unmount; path=%s\n", se->se_path);
 	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
 	zfsctl_snapshot_rele(se);
+	zfs_dbgmsg("done umount: %s", argv[5]);
 
 
 	/*
@@ -1049,8 +1052,13 @@ zfsctl_snapshot_unmount(char *snapname, int flags)
 	return (error);
 }
 
+static int umh_init(struct subprocess_info *info, struct cred *cred)
+{
+	return 0;
+}
+
 int
-zfsctl_snapshot_mount(struct path *path, int flags)
+zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 {
 	struct dentry *dentry = path->dentry;
 	struct inode *ip = dentry->d_inode;
@@ -1106,7 +1114,48 @@ zfsctl_snapshot_mount(struct path *path, int flags)
 	dprintf("mount; name=%s path=%s\n", full_name, full_path);
 	argv[5] = full_name;
 	argv[6] = full_path;
-	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
+
+	zfs_dbgmsg("direct-mounting: %s", full_name);
+	struct fs_context *fc;
+	struct vfsmount *mnt = NULL;
+	fc = fs_context_for_mount(&zpl_fs_type, MNT_SHRINKABLE);
+	if (IS_ERR(fc)) {
+		zfs_dbgmsg("error-fc: %d", ERR_CAST(fc));
+	}else{
+	  vfs_parse_fs_string(fc, "source", full_name, strlen(full_name));
+	  mnt = fc_mount(fc);
+	  
+	  if (IS_ERR(mnt)) {
+	  	zfs_dbgmsg("error-mnt: %d", ERR_CAST(mnt));
+	  }
+	  zfs_dbgmsg("mnt %lld", mnt);
+	  zfs_dbgmsg("put_fc %lld", fc);
+	  put_fs_context(fc);
+	}
+
+	if (!mnt || IS_ERR(mnt)) {
+	  error = ERR_CAST(mnt);
+	  goto error;
+	} else {
+	  zfs_dbgmsg("yielding vfsmount %lld", mnt);
+	  mntget(mnt);
+	  *mnt_out = mnt;
+	}
+
+	kmem_free(full_name, ZFS_MAX_DATASET_NAME_LEN);
+	kmem_free(full_path, MAXPATHLEN);
+
+	ZFS_EXIT(zfsvfs);
+
+	return (0);
+	
+	struct subprocess_info *info;
+	info = call_usermodehelper_setup(argv[0], argv, envp, GFP_KERNEL,
+					 umh_init, NULL, NULL);
+	if (info == NULL)
+		error = -ENOMEM;
+	else
+		error = call_usermodehelper_exec(info, UMH_WAIT_PROC);
 	if (error) {
 		if (!(error & MOUNT_BUSY << 8)) {
 			zfs_dbgmsg("Unable to automount %s error=%d",
