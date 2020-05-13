@@ -22,6 +22,7 @@ KERNEL_H = \
 	$(top_srcdir)/include/os/linux/spl/sys/kstat.h \
 	$(top_srcdir)/include/os/linux/spl/sys/list.h \
 	$(top_srcdir)/include/os/linux/spl/sys/mod_os.h \
+	$(top_srcdir)/include/os/linux/spl/sys/mount.h \
 	$(top_srcdir)/include/os/linux/spl/sys/mutex.h \
 	$(top_srcdir)/include/os/linux/spl/sys/param.h \
 	$(top_srcdir)/include/os/linux/spl/sys/processor.h \
