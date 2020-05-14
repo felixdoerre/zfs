@@ -1134,13 +1134,30 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 	}
 
 	if (!mnt || IS_ERR(mnt)) {
-	  error = ERR_CAST(mnt);
+	  error = PTR_ERR(mnt);
 	  goto error;
 	} else {
 	  zfs_dbgmsg("yielding vfsmount %lld", mnt);
 	  mntget(mnt);
 	  *mnt_out = mnt;
 	}
+
+	snap_zfsvfs = ITOZSB(mnt->mnt_root->d_inode);
+	snap_zfsvfs->z_parent = zfsvfs;
+	dentry = mnt->mnt_root;
+	zfs_dbgmsg("locking snapshot for unmounting");
+		rw_enter(&zfs_snapshot_lock, RW_WRITER);
+		zfs_dbgmsg("got lock: %s; %s; ", full_name, full_path);
+		se = zfsctl_snapshot_alloc(full_name, full_path,
+		    snap_zfsvfs->z_os->os_spa, dmu_objset_id(snap_zfsvfs->z_os),
+		    dentry);
+	zfs_dbgmsg("got snapshot alloced");
+		zfsctl_snapshot_add(se);
+	zfs_dbgmsg("got added");
+		zfsctl_snapshot_unmount_delay_impl(se, zfs_expire_snapshot);
+	zfs_dbgmsg("got delay scheduled");
+		rw_exit(&zfs_snapshot_lock);
+	zfs_dbgmsg("locking snapshot for unmount done");
 
 	kmem_free(full_name, ZFS_MAX_DATASET_NAME_LEN);
 	kmem_free(full_path, MAXPATHLEN);

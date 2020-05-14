@@ -27,7 +27,7 @@ old_expiry=$(cat /sys/module/zfs/parameters/zfs_expire_snapshot)
 function cleanup {
     zfs destroy -r "$fs"
     (( mntns != 0 )) && kill $mntns
-    printf "%s" "${old_expiry}" /sys/module/zfs/parameters/zfs_expire_snapshot
+    printf "%s" "${old_expiry}" > /sys/module/zfs/parameters/zfs_expire_snapshot
 }
 
 log_onexit cleanup
@@ -84,13 +84,19 @@ assert $(snaps_outside) == 0
 log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
 /usr/bin/unshare -m bash -c "while :; do sleep 5; done" &
 mntns=$!
+mount | grep -F "$fs@"
+/usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt mount | grep -F "$fs@"
 assert $(snaps_outside) == 1
 assert $(snaps_inside) == 1
 
 # now expire all mounts
 sleep 10
-#but this seems to be broken?
-assert $(snaps_outside) == 1
+printf "outer\n"
+mount | grep -F "$fs@"
+printf "inner\n"
+/usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt mount | grep -F "$fs@"
+assert $(snaps_outside) == 0
+# TODO this is undesired
 assert $(snaps_inside) == 1
 
 log_pass "All ZFS file systems would have been unmounted"

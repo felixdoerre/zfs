@@ -22,40 +22,63 @@ fs=$TESTPOOL/$TESTFS.chroot
 
 log_must mkdir -p $chroot/dataset
 log_must zfs create -o mountpoint=$chroot/dataset $fs
+old_expiry=$(cat /sys/module/zfs/parameters/zfs_expire_snapshot)
 
 function cleanup {
     zfs destroy -r "$fs"
     rm -R "$chroot"
+    printf "%s" "${old_expiry}" > /sys/module/zfs/parameters/zfs_expire_snapshot
+    mount | grep zfs
 }
 
 log_onexit cleanup
 
 function test_chroot {
     local mountpoint=$1
-    local dir=$2
+    local dir=${chroot}$2
+    local chroot_outer=$2
     local mountpoint_inner=$3
+    local expiry=$4
+    [[ $expiry == auto ]] &&  printf "5" > /sys/module/zfs/parameters/zfs_expire_snapshot
+    cat /sys/module/zfs/parameters/zfs_expire_snapshot
 
     log_must mkdir -p "$dir/bin"
     log_must cp /bin/busybox "$dir/bin"
     log_must ln -s /bin/busybox "$dir/bin/sh"
     log_must ln -s /bin/busybox "$dir/bin/ls"
+    log_must touch "${mountpoint}/testfile"
     log_must zfs snap ${fs}@snap
-
-    log_must /usr/sbin/chroot ${dir} /bin/ls ${mountpoint_inner}/.zfs/snapshot/snap/bin/busybox
-    log_must ls ${mountpoint}/.zfs/snapshot/snap/bin/busybox
-    log_must eval "mount | grep @"
-    log_must umount ${mountpoint}/.zfs/snapshot/snap
     log_mustnot eval "mount | grep @"
 
-    log_must ls ${mountpoint}/.zfs/snapshot/snap/bin/busybox
-    log_must /usr/sbin/chroot ${dir} /bin/ls ${mountpoint_inner}/.zfs/snapshot/snap/bin/busybox
+    log_must /usr/sbin/chroot ${dir} /bin/ls ${mountpoint_inner}/.zfs/snapshot/snap/testfile
+    log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
+    log_must eval "mount | grep @"
+    if [[ $expiry == auto ]]; then
+	# TODO this is a bug
+	#log_must sleep 10
+	log_must umount ${mountpoint}/.zfs/snapshot/snap
+    else
+	log_must umount ${mountpoint}/.zfs/snapshot/snap
+    fi
+    log_mustnot eval "mount | grep @"
+
+    log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
+    log_must /usr/sbin/chroot ${dir} /bin/ls ${mountpoint_inner}/.zfs/snapshot/snap/testfile
     log_must eval "mount | grep @"
 
-    log_must umount ${mountpoint}/.zfs/snapshot/snap
+    if [[ $expiry == auto ]]; then
+	log_must sleep 10
+    else
+	log_must umount ${mountpoint}/.zfs/snapshot/snap
+    fi
     log_must zfs destroy ${fs}@snap
+    log_must rm -r "$dir/bin"
+
+    printf "%s" "${old_expiry}" > /sys/module/zfs/parameters/zfs_expire_snapshot
 }
 
-test_chroot "$chroot/dataset" "$chroot/dataset" ""
-test_chroot "$chroot/dataset" "$chroot" "/dataset"
+test_chroot "$chroot/dataset" "/dataset" "" "manual"
+test_chroot "$chroot/dataset" "" "/dataset" "manual"
+test_chroot "$chroot/dataset" "" "/dataset" "auto"
 
 log_pass "All ZFS file systems would have been unmounted"
