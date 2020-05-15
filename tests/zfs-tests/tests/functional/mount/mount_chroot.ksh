@@ -54,9 +54,7 @@ function test_chroot {
     log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
     log_must eval "mount | grep @"
     if [[ $expiry == auto ]]; then
-	# TODO this is a bug
-	#log_must sleep 10
-	log_must umount ${mountpoint}/.zfs/snapshot/snap
+	log_must sleep 10
     else
 	log_must umount ${mountpoint}/.zfs/snapshot/snap
     fi

@@ -114,10 +114,10 @@ int zfs_admin_snapshot = 0;
 
 typedef struct {
 	char		*se_name;	/* full snapshot name */
-	char		*se_path;	/* full mount path */
 	spa_t		*se_spa;	/* pool spa */
 	uint64_t	se_objsetid;	/* snapshot objset id */
 	struct dentry   *se_root_dentry; /* snapshot root dentry */
+	struct path     se_mount_target;
 	taskqid_t	se_taskqid;	/* scheduled unmount taskqid */
 	avl_node_t	se_node_name;	/* zfs_snapshots_by_name link */
 	avl_node_t	se_node_objsetid; /* zfs_snapshots_by_objsetid link */
@@ -131,18 +131,21 @@ static void zfsctl_snapshot_unmount_delay_impl(zfs_snapentry_t *se, int delay);
  * the snapshot name and provided mount point.  No reference is taken.
  */
 static zfs_snapentry_t *
-zfsctl_snapshot_alloc(char *full_name, char *full_path, spa_t *spa,
-    uint64_t objsetid, struct dentry *root_dentry)
+zfsctl_snapshot_alloc(char *full_name, spa_t *spa,
+    uint64_t objsetid, struct dentry *root_dentry, struct path *mount_target)
 {
 	zfs_snapentry_t *se;
 
 	se = kmem_zalloc(sizeof (zfs_snapentry_t), KM_SLEEP);
 
 	se->se_name = kmem_strdup(full_name);
-	se->se_path = kmem_strdup(full_path);
 	se->se_spa = spa;
 	se->se_objsetid = objsetid;
 	se->se_root_dentry = root_dentry;
+	if (mount_target) {
+	  se->se_mount_target = *mount_target;
+	  path_get(&se->se_mount_target);
+	}
 	se->se_taskqid = TASKQID_INVALID;
 
 	zfs_refcount_create(&se->se_refcount);
@@ -159,8 +162,7 @@ zfsctl_snapshot_free(zfs_snapentry_t *se)
 {
 	zfs_refcount_destroy(&se->se_refcount);
 	kmem_strfree(se->se_name);
-	kmem_strfree(se->se_path);
-
+	path_put(&se->se_mount_target);
 	kmem_free(se, sizeof (zfs_snapentry_t));
 }
 
@@ -1031,11 +1033,21 @@ zfsctl_snapshot_unmount(char *snapname, int flags)
 	}
 	rw_exit(&zfs_snapshot_lock);
 
+
+	char *full_path = kmem_zalloc(MAXPATHLEN, KM_SLEEP);
+
+	error = zfsctl_snapshot_path(&se->se_mount_target, MAXPATHLEN, full_path);
+	if (error) {
+	  kmem_free(full_path, MAXPATHLEN);
+	  return error;
+	}
+
+	
 	if (flags & MNT_FORCE)
 		argv[4] = "-fn";
-	argv[5] = se->se_path;
+	argv[5] = full_path;
 	zfs_dbgmsg("starting umount: %s", argv[5]);
-	dprintf("unmount; path=%s\n", se->se_path);
+	dprintf("unmount; path=%s\n", full_path);
 	error = call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
 	zfsctl_snapshot_rele(se);
 	zfs_dbgmsg("done umount: %s", argv[5]);
@@ -1049,6 +1061,7 @@ zfsctl_snapshot_unmount(char *snapname, int flags)
 	if (error)
 		error = SET_ERROR(EBUSY);
 
+	kmem_free(full_path, MAXPATHLEN);
 	return (error);
 }
 
@@ -1099,6 +1112,8 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 		goto error;
 	}
 
+	
+	zfs_dbgmsg("kern mount ms: %d", current->nsproxy->mnt_ns);
 	/*
 	 * Attempt to mount the snapshot from user space.  Normally this
 	 * would be done using the vfs_kern_mount() function, however that
@@ -1115,6 +1130,7 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 	argv[5] = full_name;
 	argv[6] = full_path;
 
+	zfs_dbgmsg("parent: %d", dentry->d_parent);
 	zfs_dbgmsg("direct-mounting: %s", full_name);
 	struct fs_context *fc;
 	struct vfsmount *mnt = NULL;
@@ -1144,20 +1160,19 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 
 	snap_zfsvfs = ITOZSB(mnt->mnt_root->d_inode);
 	snap_zfsvfs->z_parent = zfsvfs;
-	dentry = mnt->mnt_root;
-	zfs_dbgmsg("locking snapshot for unmounting");
+	zfs_dbgmsg("locking snapshot for expiry marking");
 		rw_enter(&zfs_snapshot_lock, RW_WRITER);
 		zfs_dbgmsg("got lock: %s; %s; ", full_name, full_path);
-		se = zfsctl_snapshot_alloc(full_name, full_path,
+		se = zfsctl_snapshot_alloc(full_name, 
 		    snap_zfsvfs->z_os->os_spa, dmu_objset_id(snap_zfsvfs->z_os),
-		    dentry);
+					   mnt->mnt_root, path);
 	zfs_dbgmsg("got snapshot alloced");
 		zfsctl_snapshot_add(se);
 	zfs_dbgmsg("got added");
 		zfsctl_snapshot_unmount_delay_impl(se, zfs_expire_snapshot);
 	zfs_dbgmsg("got delay scheduled");
 		rw_exit(&zfs_snapshot_lock);
-	zfs_dbgmsg("locking snapshot for unmount done");
+	zfs_dbgmsg("locking snapshot for expiry done");
 
 	kmem_free(full_name, ZFS_MAX_DATASET_NAME_LEN);
 	kmem_free(full_path, MAXPATHLEN);
@@ -1205,9 +1220,9 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 		spath.mnt->mnt_flags |= MNT_SHRINKABLE;
 
 		rw_enter(&zfs_snapshot_lock, RW_WRITER);
-		se = zfsctl_snapshot_alloc(full_name, full_path,
+		se = zfsctl_snapshot_alloc(full_name,
 		    snap_zfsvfs->z_os->os_spa, dmu_objset_id(snap_zfsvfs->z_os),
-		    dentry);
+					   dentry, path);
 		zfsctl_snapshot_add(se);
 		zfsctl_snapshot_unmount_delay_impl(se, zfs_expire_snapshot);
 		rw_exit(&zfs_snapshot_lock);

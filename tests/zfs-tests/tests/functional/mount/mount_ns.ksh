@@ -25,8 +25,8 @@ mntns=0
 old_expiry=$(cat /sys/module/zfs/parameters/zfs_expire_snapshot)
 
 function cleanup {
-    zfs destroy -r "$fs"
     (( mntns != 0 )) && kill $mntns
+    zfs destroy -r "$fs"
     printf "%s" "${old_expiry}" > /sys/module/zfs/parameters/zfs_expire_snapshot
 }
 
@@ -98,5 +98,7 @@ printf "inner\n"
 assert $(snaps_outside) == 0
 # TODO this is undesired
 assert $(snaps_inside) == 1
+log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt umount /var/tmp/testdir.ns/.zfs/snapshot/snap
+
 
 log_pass "All ZFS file systems would have been unmounted"
