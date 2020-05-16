@@ -16,6 +16,7 @@
 #
 
 . $STF_SUITE/include/libtest.shlib
+. $STF_SUITE/tests/functional/mount/mount_common
 
 chroot=$TESTDIR.chroot
 fs=$TESTPOOL/$TESTFS.chroot
@@ -38,9 +39,7 @@ function test_chroot {
     local dir=${chroot}$2
     local chroot_outer=$2
     local mountpoint_inner=$3
-    local expiry=$4
-    [[ $expiry == auto ]] &&  printf "5" > /sys/module/zfs/parameters/zfs_expire_snapshot
-    cat /sys/module/zfs/parameters/zfs_expire_snapshot
+    [[ $unmount_type == auto ]] && printf "2" > /sys/module/zfs/parameters/zfs_expire_snapshot
 
     log_must mkdir -p "$dir/bin"
     log_must cp /bin/busybox "$dir/bin"
@@ -53,30 +52,24 @@ function test_chroot {
     log_must /usr/sbin/chroot ${dir} /bin/ls ${mountpoint_inner}/.zfs/snapshot/snap/testfile
     log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
     log_must eval "mount | grep @"
-    if [[ $expiry == auto ]]; then
-	log_must sleep 10
-    else
-	log_must umount ${mountpoint}/.zfs/snapshot/snap
-    fi
+    unmount_automounted ${mountpoint}/.zfs/snapshot/snap
     log_mustnot eval "mount | grep @"
 
     log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
     log_must /usr/sbin/chroot ${dir} /bin/ls ${mountpoint_inner}/.zfs/snapshot/snap/testfile
     log_must eval "mount | grep @"
 
-    if [[ $expiry == auto ]]; then
-	log_must sleep 10
-    else
-	log_must umount ${mountpoint}/.zfs/snapshot/snap
-    fi
+    unmount_automounted ${mountpoint}/.zfs/snapshot/snap
     log_must zfs destroy ${fs}@snap
     log_must rm -r "$dir/bin"
 
     printf "%s" "${old_expiry}" > /sys/module/zfs/parameters/zfs_expire_snapshot
 }
 
-test_chroot "$chroot/dataset" "/dataset" "" "manual"
-test_chroot "$chroot/dataset" "" "/dataset" "manual"
-test_chroot "$chroot/dataset" "" "/dataset" "auto"
+unmount_type=manual
+test_chroot "$chroot/dataset" "/dataset" ""
+test_chroot "$chroot/dataset" "" "/dataset"
+unmount_type=auto
+test_chroot "$chroot/dataset" "" "/dataset"
 
 log_pass "All ZFS file systems would have been unmounted"

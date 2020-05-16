@@ -16,6 +16,7 @@
 #
 
 . $STF_SUITE/include/libtest.shlib
+. $STF_SUITE/tests/functional/mount/mount_common
 
 mountpoint=$TESTDIR.ns
 fs=$TESTPOOL/$TESTFS.ns
@@ -35,9 +36,6 @@ log_onexit cleanup
 log_must touch ${mountpoint}/testfile
 log_must zfs snap ${fs}@snap
 
-function snaps_outside {
-    mount | grep -F "$fs@" | wc -l
-}
 function snaps_inside {
     /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt mount | grep -F "$fs@" | wc -l
 }
@@ -75,7 +73,8 @@ printf "%s" "5" > /sys/module/zfs/parameters/zfs_expire_snapshot
 log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
 assert $(snaps_outside) == 1
 mount | grep zfs
-sleep 10
+unmount_type=auto
+unmount_automounted ${mountpoint}/.zfs/snapshot/snap
 mount | grep zfs
 printf "should have expired now, checking...\n"
 assert $(snaps_outside) == 0
