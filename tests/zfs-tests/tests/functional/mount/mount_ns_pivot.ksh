@@ -76,7 +76,7 @@ for i in {0..10}; do
 done
 assert $(snaps_outside) == 0
 # TODO this is undesired.
-assert $(snaps_inside) == 1
-/usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt /bin/umount /.zfs/snapshot/snap
+assert $(snaps_inside) == 0
+#/usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt /bin/umount /.zfs/snapshot/snap
 
 log_pass "All ZFS file systems would have been unmounted"

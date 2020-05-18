@@ -92,15 +92,15 @@ assert $(snaps_outside) == 1
 assert $(snaps_inside) == 1
 
 # now expire all mounts
-sleep 10
+sleep 15
 printf "outer\n"
 mount | grep -F "$fs@"
 printf "inner\n"
 /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt mount | grep -F "$fs@"
 assert $(snaps_outside) == 0
 # TODO this is undesired
-assert $(snaps_inside) == 1
-log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt umount /var/tmp/testdir.ns/.zfs/snapshot/snap
+assert $(snaps_inside) == 0
+#log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt umount /var/tmp/testdir.ns/.zfs/snapshot/snap
 
 assert $(snaps_outside) == 0
 assert $(snaps_inside) == 0

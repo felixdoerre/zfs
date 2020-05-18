@@ -126,6 +126,7 @@ typedef struct {
 
 static void zfsctl_snapshot_unmount_delay_impl(zfs_snapentry_t *se, int delay);
 
+static LIST_HEAD(zfs_automount_list);
 /*
  * Allocate a new zfs_snapentry_t being careful to make a copy of the
  * the snapshot name and provided mount point.  No reference is taken.
@@ -160,6 +161,7 @@ zfsctl_snapshot_alloc(char *full_name, spa_t *spa,
 static void
 zfsctl_snapshot_free(zfs_snapentry_t *se)
 {
+	zfs_dbgmsg("freeing snapshot expiry entry: %s", se->se_name);
 	zfs_refcount_destroy(&se->se_refcount);
 	kmem_strfree(se->se_name);
 	path_put(&se->se_mount_target);
@@ -322,6 +324,21 @@ zfsctl_snapshot_rename(char *old_snapname, char *new_snapname)
 	return (0);
 }
 
+static void
+gpl_expire(struct work_struct *data);
+static DECLARE_DELAYED_WORK(zfs_automount_task, gpl_expire);
+
+static void
+gpl_expire(struct work_struct *data)
+{
+	struct list_head *list = &zfs_automount_list;
+	zfs_dbgmsg("gpl expire");
+	mark_mounts_for_expiry(list);
+	if (!list_empty(list))
+	  schedule_delayed_work(&zfs_automount_task, 5 * HZ);
+}
+
+
 /*
  * Delayed task responsible for unmounting an expired automounted snapshot.
  */
@@ -361,6 +378,9 @@ snapentry_expire(void *data)
 static void
 zfsctl_snapshot_unmount_cancel(zfs_snapentry_t *se)
 {
+	zfs_dbgmsg("Canceling autounmount of: %s", se->se_name);
+	(void) snapentry_expire;
+	dump_stack();
 	if (taskq_cancel_id(system_delay_taskq, se->se_taskqid) == 0) {
 		se->se_taskqid = TASKQID_INVALID;
 		zfsctl_snapshot_rele(se);
@@ -379,8 +399,7 @@ zfsctl_snapshot_unmount_delay_impl(zfs_snapentry_t *se, int delay)
 		return;
 
 	zfsctl_snapshot_hold(se);
-	se->se_taskqid = taskq_dispatch_delay(system_delay_taskq,
-	    snapentry_expire, se, TQ_SLEEP, ddi_get_lbolt() + delay * HZ);
+	schedule_delayed_work(&zfs_automount_task, 5 * HZ);
 }
 
 /*
@@ -1042,6 +1061,8 @@ zfsctl_snapshot_unmount(char *snapname, int flags)
 	  return error;
 	}
 
+	return (0);
+
 	
 	if (flags & MNT_FORCE)
 		argv[4] = "-fn";
@@ -1134,7 +1155,7 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 	zfs_dbgmsg("direct-mounting: %s", full_name);
 	struct fs_context *fc;
 	struct vfsmount *mnt = NULL;
-	fc = fs_context_for_mount(&zpl_fs_type, MNT_SHRINKABLE);
+	fc = fs_context_for_submount(&zpl_fs_type, dentry);
 	if (IS_ERR(fc)) {
 		zfs_dbgmsg("error-fc: %d", ERR_CAST(fc));
 	}else{
@@ -1150,17 +1171,20 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 	}
 
 	if (!mnt || IS_ERR(mnt)) {
-	  error = PTR_ERR(mnt);
+	  error = 0;//PTR_ERR(mnt);
 	  goto error;
 	} else {
 	  zfs_dbgmsg("yielding vfsmount %lld", mnt);
+	  mnt_set_expiry(mnt, &zfs_automount_list);
+	  mnt->mnt_flags |= MNT_SHRINKABLE;
 	  mntget(mnt);
 	  *mnt_out = mnt;
 	}
 
 	snap_zfsvfs = ITOZSB(mnt->mnt_root->d_inode);
 	snap_zfsvfs->z_parent = zfsvfs;
-	zfs_dbgmsg("locking snapshot for expiry marking");
+	schedule_delayed_work(&zfs_automount_task, 5 * HZ);
+	/*zfs_dbgmsg("locking snapshot for expiry marking");
 		rw_enter(&zfs_snapshot_lock, RW_WRITER);
 		zfs_dbgmsg("got lock: %s; %s; ", full_name, full_path);
 		se = zfsctl_snapshot_alloc(full_name, 
@@ -1172,7 +1196,7 @@ zfsctl_snapshot_mount(struct path *path, int flags, struct vfsmount **mnt_out)
 		zfsctl_snapshot_unmount_delay_impl(se, zfs_expire_snapshot);
 	zfs_dbgmsg("got delay scheduled");
 		rw_exit(&zfs_snapshot_lock);
-	zfs_dbgmsg("locking snapshot for expiry done");
+		zfs_dbgmsg("locking snapshot for expiry done");*/
 
 	kmem_free(full_name, ZFS_MAX_DATASET_NAME_LEN);
 	kmem_free(full_path, MAXPATHLEN);
