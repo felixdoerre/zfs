@@ -55,12 +55,15 @@ assert $(snaps_inside) == 0
 log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt ls ${mountpoint}/.zfs/snapshot/snap/testfile
 assert $(snaps_outside) == 0
 assert $(snaps_inside) == 1
-log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt umount ${mountpoint}/.zfs/snapshot/snap
 
-# TODO this is not desired behavior but it leaves the following state broken so we will not try it..
-#log_must ls ${mountpoint}/.zfs/snapshot/snap/testfile
-#assert $(snaps_outside) == 0
-#assert $(snaps_inside) == 1
+# TODO this is not desired behavior
+log_mustnot ls ${mountpoint}/.zfs/snapshot/snap/testfile
+assert $(snaps_outside) == 0
+assert $(snaps_inside) == 1
+
+log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt umount ${mountpoint}/.zfs/snapshot/snap
+assert $(snaps_outside) == 0
+assert $(snaps_inside) == 0
 
 kill ${mntns}
 mntns=0
@@ -99,5 +102,7 @@ assert $(snaps_outside) == 0
 assert $(snaps_inside) == 1
 log_must /usr/bin/nsenter --mount=/proc/${mntns}/ns/mnt umount /var/tmp/testdir.ns/.zfs/snapshot/snap
 
+assert $(snaps_outside) == 0
+assert $(snaps_inside) == 0
 
 log_pass "All ZFS file systems would have been unmounted"
