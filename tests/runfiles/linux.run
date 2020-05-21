@@ -120,6 +120,10 @@ tests = ['mmp_on_thread', 'mmp_on_uberblocks', 'mmp_on_off', 'mmp_interval',
     'mmp_on_zdb', 'mmp_write_distribution', 'mmp_hostid']
 tags = ['functional', 'mmp']
 
+[tests/functional/pam:Linux]
+tests = ['001_basic']
+tags = ['functional', 'pam']
+
 [tests/functional/mount:Linux]
 tests = ['umount_unlinked_drain']
 tags = ['functional', 'mount']
